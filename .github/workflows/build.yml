@@ -1,0 +1,117 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: llama.cpp git URL
+        type: string
+        required: false
+        default: https://github.com/ggml-org/llama.cpp
+      ref:
+        description: Branch, tag, or commit to build
+        type: string
+        required: false
+        default: master
+      variant:
+        description: Variant to add to the tarball name
+        type: string
+        required: false
+        default: master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+
+          for d in \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /usr/share/swift \
+          ; do
+            sudo rm -rf "$d" >/dev/null || true
+          done
+
+          sudo docker system prune --all --volumes -f >/dev/null || true
+
+          sudo apt-get update  >/dev/null || true
+
+          sudo apt-get --purge autoremove -y \
+            ant \
+            azure-cli \
+            docker-ce \
+            firefox \
+            google-chrome-* \
+            google-cloud-* \
+            libllvm* \
+            llvm-* \
+            microsoft-edge-* \
+            mysql-client-* \
+            mysql-server-core-* \
+            php* \
+            postgresql-* \
+            powershell \
+            snapd \
+            temurin-* \
+          >/dev/null \
+          || true
+
+          sudo ./00-build-dependencies.sh "${{ inputs.repo }}" "${{ inputs.ref }}" "${{ inputs.variant }}"
+
+      - name: Build Vulkan
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          sudo ./01-build-vulkan.sh
+
+      - name: Build ROCm
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          sudo ./02-build-rocm.sh
+
+      - name: Build CUDA
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          sudo ./03-build-cuda.sh
+
+      - name: Finalize tarball
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eu
+          sudo ./04-finalize.sh
+
+      - name: Load info from pkginfo
+        id: pkginfo
+        run: |
+          set -eu
+
+          . "${GITHUB_WORKSPACE}/pkginfo.txt"
+
+          printf "name=%s\n" "$NAME" >>"${GITHUB_OUTPUT}"
+
+      - name: Create GitHub release
+        env:
+          RELEASE_LABEL: Release-${{ github.run_id }}-${{ github.run_attempt }}
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ env.RELEASE_LABEL }}
+          tag_name: ${{ env.RELEASE_LABEL }}
+          files: ${{ steps.pkginfo.outputs.name }}
+          body_path: ${{ github.workspace }}/pkginfo.txt
