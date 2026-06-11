@@ -22,5 +22,5 @@ cmake -S . -B build -G Ninja \
     -DLLAMA_BUILD_EXAMPLES=OFF \
     -DLLAMA_BUILD_TESTS=OFF
 
-cmake --build build -j "$(nproc --ignore 2)"
+cmake --build build -j "$(nproc --ignore 2)" --target llama-diffusion-cli
 cmake --install build --strip
